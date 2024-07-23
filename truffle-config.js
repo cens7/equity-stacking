@@ -29,7 +29,7 @@ module.exports = {
                 privateKeys: [PRIVATE_KEY],
                 providerOrUrl: `https://linea-sepolia.infura.io/v3/${INFURA_API_KEY}`
             }),
-            network_id: 59140, // Linea 测试网 ID
+            network_id: 59141, // Linea 测试网 ID
             gas: 5500000,
             confirmations: 2,
             timeoutBlocks: 200,
