@@ -1,0 +1,18 @@
+### IntelliJ IDEA ###
+/storage/
+/home/
+/logs/
+.idea
+*.iws
+*.iml
+*.ipr
+
+
+.env
+
+### VS Code ###
+.vscode/
+
+### node
+/node_modules
+
