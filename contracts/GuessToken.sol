@@ -32,6 +32,8 @@ contract GuessToken is Initializable, ERC20Upgradeable, PausableUpgradeable, Own
     }
 
     function initialize(address _btcPriceFeed) public initializer {
+        require(_btcPriceFeed != address(0), "Invalid price feed address");
+
         __ERC20_init("GuessToken", "GUESS");
         __Pausable_init();
         __Ownable_init();

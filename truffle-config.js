@@ -4,6 +4,7 @@ require('dotenv').config(); // 用于管理环境变量
 const MNEMONIC = process.env.MNEMONIC;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const INFURA_API_KEY = process.env.INFURA_API_KEY;
+const ALCHEMY_SEPOLIA_API_KEY = process.env.ALCHEMY_SEPOLIA_API_KEY;
 
 module.exports = {
     networks: {
@@ -24,13 +25,15 @@ module.exports = {
             timeoutBlocks: 200,
             skipDryRun: true
         },
-        linea_testnet: {
+        eth_sepolia_testnet: {
             provider: () => new HDWalletProvider({
                 privateKeys: [PRIVATE_KEY],
-                providerOrUrl: `https://linea-sepolia.infura.io/v3/${INFURA_API_KEY}`
+                // providerOrUrl: `https://sepolia.infura.io/v3/${INFURA_API_KEY}`
+                providerOrUrl: `https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_SEPOLIA_API_KEY}`
             }),
-            network_id: 59141, // Linea 测试网 ID
-            gas: 5500000,
+            network_id: 11155111, // Linea 测试网 ID
+            gas: 29000000,
+            gasPrice: 10000000000, // 10 Gwei
             confirmations: 2,
             timeoutBlocks: 200,
             skipDryRun: true
