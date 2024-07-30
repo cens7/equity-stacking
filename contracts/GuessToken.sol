@@ -1,19 +1,22 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import "@chainlink/contracts/src/v0.8/automation/AutomationCompatible.sol";
 
-contract GuessToken is Initializable, ERC20Upgradeable, PausableUpgradeable, OwnableUpgradeable, UUPSUpgradeable, AutomationCompatibleInterface {
+contract GuessToken is ERC20, Pausable, Ownable, AutomationCompatibleInterface {
     AggregatorV3Interface private btcPriceFeed;
 
     uint256 public rewardPool;
     uint256 private constant GUESS_DURATION = 10 seconds;
+    uint256 private constant MIN_STAKE_AMOUNT = 10000 * 10**18; // 最少质押10000个代币
+    uint256 private constant TOKENS_PER_ETH = 10000000000 * 10**18; // 0.00001 ETH 兑换 100000000 个代币
+    uint256 private constant MIN_PURCHASE_ETH = 10000000000000; // 0.00001 ETH in wei
+    uint256 private constant MAX_DAILY_EXCHANGE_PER_USER = 200000000000000; // 0.0002 ETH in wei
+    uint256 private constant MAX_DAILY_EXCHANGE_TOTAL = 2000000000000000; // 0.002 ETH in wei
 
     mapping(address => uint256) private _lockedBalances;
     mapping(address => uint256) private _lockReleaseTime;
@@ -21,36 +24,72 @@ contract GuessToken is Initializable, ERC20Upgradeable, PausableUpgradeable, Own
     mapping(address => bool) private _isGuessing;
     mapping(address => bool) private _guessedUp;
     mapping(address => uint256) private _guessStartTime;
+    mapping(address => bool) private _hasParticipated;
+    mapping(address => uint256) private _lastExchangeTime;
+    mapping(address => uint256) private _dailyExchangeAmount;
+    uint256 private _totalDailyExchange;
+    uint256 private _lastDailyResetTime;
 
     event Staked(address indexed user, uint256 amount, bool guessedUp);
     event GuessResolved(address indexed user, uint256 amount, bool metConditionA, uint256 reward);
     event StakeReleased(address indexed user, uint256 amount);
+    event TokensPurchased(address indexed buyer, uint256 ethAmount, uint256 tokenAmount);
+    event TokensExchanged(address indexed seller, uint256 tokenAmount, uint256 ethAmount);
 
-    /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {
-        _disableInitializers();
+    constructor(address _btcPriceFeed) ERC20("GuessToken", "GUESS") {
+        require(_btcPriceFeed != address(0), "Invalid price feed address");
+        btcPriceFeed = AggregatorV3Interface(_btcPriceFeed);
+        rewardPool = 0;
+        _lastDailyResetTime = block.timestamp;
     }
 
-    function initialize(address _btcPriceFeed) public initializer {
-        require(_btcPriceFeed != address(0), "Invalid price feed address");
+    function purchaseTokens() public payable {
+        require(msg.value >= MIN_PURCHASE_ETH, "Must send at least 0.00001 ETH");
+        uint256 tokensToMint = (msg.value * TOKENS_PER_ETH) / (1 ether);
+        _mint(msg.sender, tokensToMint);
+        emit TokensPurchased(msg.sender, msg.value, tokensToMint);
+    }
 
-        __ERC20_init("GuessToken", "GUESS");
-        __Pausable_init();
-        __Ownable_init();
-        __UUPSUpgradeable_init();
+    function exchangeTokensForEth(uint256 tokenAmount) public {
+        require(_hasParticipated[msg.sender], "Must have participated in guessing game");
+        require(tokenAmount >= TOKENS_PER_ETH, "Must exchange at least 100000000 tokens");
 
-        btcPriceFeed = AggregatorV3Interface(_btcPriceFeed);
-        rewardPool = 0; // 初始奖励池为0，可以之后通过函数添加
+        uint256 ethToSend = (tokenAmount * 1 ether) / TOKENS_PER_ETH;
+        require(ethToSend <= MAX_DAILY_EXCHANGE_PER_USER, "Exceeds daily exchange limit per user");
+
+        _resetDailyExchangeIfNeeded();
+
+        require(_totalDailyExchange + ethToSend <= MAX_DAILY_EXCHANGE_TOTAL, "Exceeds total daily exchange limit");
+
+        require(address(this).balance >= ethToSend, "Insufficient ETH in contract");
+
+        _burn(msg.sender, tokenAmount);
+        _totalDailyExchange += ethToSend;
+        _dailyExchangeAmount[msg.sender] += ethToSend;
+        _lastExchangeTime[msg.sender] = block.timestamp;
+
+        payable(msg.sender).transfer(ethToSend);
+
+        emit TokensExchanged(msg.sender, tokenAmount, ethToSend);
+    }
+
+    function _resetDailyExchangeIfNeeded() private {
+        if (block.timestamp >= _lastDailyResetTime + 1 days) {
+            _totalDailyExchange = 0;
+            _lastDailyResetTime = block.timestamp;
+        }
     }
 
     function stake(uint256 amount, bool guessUp) public {
         require(!_isGuessing[msg.sender], "GuessToken: You have an ongoing guess");
-        require(balanceOf(msg.sender) - _lockedBalances[msg.sender] >= amount, "GuessToken: Insufficient balance");
+        require(amount >= MIN_STAKE_AMOUNT, "GuessToken: Stake amount too low");
+        require(balanceOf(msg.sender) >= amount, "GuessToken: Insufficient balance");
 
         _stakedBalances[msg.sender] = amount;
         _isGuessing[msg.sender] = true;
         _guessedUp[msg.sender] = guessUp;
         _guessStartTime[msg.sender] = block.timestamp;
+        _hasParticipated[msg.sender] = true;
 
         _transfer(msg.sender, address(this), amount);
 
@@ -152,9 +191,7 @@ contract GuessToken is Initializable, ERC20Upgradeable, PausableUpgradeable, Own
         super._beforeTokenTransfer(from, to, amount);
     }
 
-    function _authorizeUpgrade(address newImplementation)
-    internal
-    override
-    onlyOwner
-    {}
+    receive() external payable {
+        purchaseTokens();
+    }
 }
