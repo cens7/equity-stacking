@@ -1,4 +1,3 @@
-const { deployProxy } = require('@openzeppelin/truffle-upgrades');
 const GuessToken = artifacts.require("GuessToken");
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -20,7 +19,8 @@ module.exports = async function (deployer, network, accounts) {
 
     try {
         await sleep(5000); // 增加延迟，避免过多请求导致的错误
-        const instance = await deployProxy(GuessToken, [priceFeedAddress], { deployer, initializer: 'initialize' });
+        // const instance = await deployProxy(GuessToken, [priceFeedAddress], { deployer, initializer: 'initialize' });
+        const instance = await deployer.deploy(GuessToken, priceFeedAddress);
         console.log('GuessToken deployed at:', instance.address);
     } catch (error) {
         console.error('Deployment failed:', error);

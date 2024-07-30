@@ -36,21 +36,21 @@ contract GuessToken is ERC20, Pausable, Ownable, AutomationCompatibleInterface {
     event TokensPurchased(address indexed buyer, uint256 ethAmount, uint256 tokenAmount);
     event TokensExchanged(address indexed seller, uint256 tokenAmount, uint256 ethAmount);
 
-    constructor(address _btcPriceFeed) ERC20("GuessToken", "GUESS") {
+    constructor(address _btcPriceFeed) ERC20("GuessToken", "GUESS") Ownable(address(this)) {
         require(_btcPriceFeed != address(0), "Invalid price feed address");
         btcPriceFeed = AggregatorV3Interface(_btcPriceFeed);
         rewardPool = 0;
         _lastDailyResetTime = block.timestamp;
     }
 
-    function purchaseTokens() public payable {
+    function purchaseTokens() public payable whenNotPaused {
         require(msg.value >= MIN_PURCHASE_ETH, "Must send at least 0.00001 ETH");
         uint256 tokensToMint = (msg.value * TOKENS_PER_ETH) / (1 ether);
         _mint(msg.sender, tokensToMint);
         emit TokensPurchased(msg.sender, msg.value, tokensToMint);
     }
 
-    function exchangeTokensForEth(uint256 tokenAmount) public {
+    function exchangeTokensForEth(uint256 tokenAmount) public whenNotPaused {
         require(_hasParticipated[msg.sender], "Must have participated in guessing game");
         require(tokenAmount >= TOKENS_PER_ETH, "Must exchange at least 100000000 tokens");
 
@@ -60,7 +60,6 @@ contract GuessToken is ERC20, Pausable, Ownable, AutomationCompatibleInterface {
         _resetDailyExchangeIfNeeded();
 
         require(_totalDailyExchange + ethToSend <= MAX_DAILY_EXCHANGE_TOTAL, "Exceeds total daily exchange limit");
-
         require(address(this).balance >= ethToSend, "Insufficient ETH in contract");
 
         _burn(msg.sender, tokenAmount);
@@ -80,7 +79,7 @@ contract GuessToken is ERC20, Pausable, Ownable, AutomationCompatibleInterface {
         }
     }
 
-    function stake(uint256 amount, bool guessUp) public {
+    function stake(uint256 amount, bool guessUp) public whenNotPaused {
         require(!_isGuessing[msg.sender], "GuessToken: You have an ongoing guess");
         require(amount >= MIN_STAKE_AMOUNT, "GuessToken: Stake amount too low");
         require(balanceOf(msg.sender) >= amount, "GuessToken: Insufficient balance");
@@ -123,19 +122,19 @@ contract GuessToken is ERC20, Pausable, Ownable, AutomationCompatibleInterface {
     }
 
     function checkConditionA(address user) private view returns (bool) {
-        (uint80 roundId, int256 startPrice, , uint256 startTimestamp, ) = btcPriceFeed.latestRoundData();
+        (, int256 startPrice, , uint256 startTimestamp, ) = btcPriceFeed.latestRoundData();
         require(startTimestamp <= _guessStartTime[user], "GuessToken: Invalid start time");
 
-        (uint80 endRoundId, int256 endPrice, , , ) = btcPriceFeed.getRoundData(roundId + 1);
-        require(endRoundId > roundId, "GuessToken: End round not available");
+        (, int256 endPrice, , , ) = btcPriceFeed.getRoundData(uint80(uint256(startPrice) + 1)); // 使用uint80避免强制类型转换问题
+        require(endPrice > startPrice, "GuessToken: End round not available");
 
         bool priceIncreased = endPrice > startPrice;
         return priceIncreased == _guessedUp[user];
     }
 
-    function checkUpkeep(bytes calldata /* checkData */) external view override returns (bool upkeepNeeded, bytes memory /* performData */) {
+    function checkUpkeep(bytes calldata /* checkData */) external view override returns (bool upkeepNeeded, bytes memory performData) {
         address[] memory guessingUsers = getGuessingUsers();
-        for (uint i = 0; i < guessingUsers.length; i++) {
+        for (uint256 i = 0; i < guessingUsers.length; i++) {
             if (block.timestamp >= _guessStartTime[guessingUsers[i]] + GUESS_DURATION) {
                 return (true, abi.encode(guessingUsers[i]));
             }
@@ -150,18 +149,16 @@ contract GuessToken is ERC20, Pausable, Ownable, AutomationCompatibleInterface {
 
     function getGuessingUsers() public view returns (address[] memory) {
         uint256 count = 0;
+        address[] memory tempUsers = new address[](balanceOf(address(this))); // 临时数组，大小与合约余额相同
         for (uint256 i = 0; i < balanceOf(address(this)); i++) {
             if (_isGuessing[address(uint160(i))]) {
+                tempUsers[count] = address(uint160(i));
                 count++;
             }
         }
-        address[] memory guessingUsers = new address[](count);
-        uint256 index = 0;
-        for (uint256 i = 0; i < balanceOf(address(this)); i++) {
-            if (_isGuessing[address(uint160(i))]) {
-                guessingUsers[index] = address(uint160(i));
-                index++;
-            }
+        address[] memory guessingUsers = new address[](count); // 精确大小的数组
+        for (uint256 j = 0; j < count; j++) {
+            guessingUsers[j] = tempUsers[j];
         }
         return guessingUsers;
     }
@@ -183,12 +180,8 @@ contract GuessToken is ERC20, Pausable, Ownable, AutomationCompatibleInterface {
         _mint(to, amount);
     }
 
-    function _beforeTokenTransfer(address from, address to, uint256 amount)
-    internal
-    override
-    whenNotPaused
-    {
-        super._beforeTokenTransfer(from, to, amount);
+    function _update(address from, address to, uint256 amount) internal override whenNotPaused {
+        super._update(from, to, amount);
     }
 
     receive() external payable {
