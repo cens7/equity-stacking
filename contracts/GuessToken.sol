@@ -30,10 +30,15 @@ contract GuessToken is ERC20, Pausable, Ownable, AutomationCompatibleInterface {
     uint256 private _totalDailyExchange;
     uint256 private _lastDailyResetTime;
 
+    // 质押代币
     event Staked(address indexed user, uint256 amount, bool guessedUp);
+    // 奖励代币
     event GuessResolved(address indexed user, uint256 amount, bool metConditionA, uint256 reward);
+    // 质押释放
     event StakeReleased(address indexed user, uint256 amount);
+    // eth兑换代币
     event TokensPurchased(address indexed buyer, uint256 ethAmount, uint256 tokenAmount);
+    // 代币兑换eth
     event TokensExchanged(address indexed seller, uint256 tokenAmount, uint256 ethAmount);
 
     constructor(address _btcPriceFeed) ERC20("GuessToken", "GUESS") Ownable(address(this)) {
@@ -76,7 +81,7 @@ contract GuessToken is ERC20, Pausable, Ownable, AutomationCompatibleInterface {
         if (block.timestamp >= _lastDailyResetTime + 1 days) {
             _totalDailyExchange = 0;
             _lastDailyResetTime = block.timestamp;
-        }
+        }i
     }
 
     function stake(uint256 amount, bool guessUp) public whenNotPaused {
